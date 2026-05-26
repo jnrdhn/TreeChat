@@ -26,7 +26,7 @@ TreeChat is a modern, privacy-focused chat interface for Large Language Models. 
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/yourusername/TreeChat.git
+   git clone [https://github.com/yourusername/TreeChat.git](https://github.com/jnrdhn/TreeChat.git)
    cd TreeChat
    ```
 
