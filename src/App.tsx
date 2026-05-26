@@ -3,16 +3,45 @@ import { Menu, X } from 'lucide-react'
 import { useChatStore } from './store/useChatStore'
 import { useSettingsStore } from './store/useSettingsStore'
 import { saveConversation, loadAllConversations, deleteConversation as dbDeleteConversation } from './store/db'
-import { streamChat, type ContextBlock } from './api/llmService'
+import {
+  streamOllamaChat,
+  streamClaudeChat,
+  buildSystemPrompt,
+  type ContextBlock,
+} from './api/llmService'
 import { Sidebar } from './components/Sidebar'
 import { TreeCanvas } from './components/TreeCanvas'
 import { ChatWindow, type PendingContextSource } from './components/ChatWindow'
 import { SettingsModal } from './components/SettingsModal'
-import type { ContextSource } from './types'
+import type { ContextSource, Provider } from './types'
 import './index.css'
 
 const MIN_CANVAS_WIDTH = 280
 const MIN_CHAT_WIDTH   = 320
+
+// ─── Toast ────────────────────────────────────────────────────────────────────
+
+interface Toast {
+  id: string
+  message: string
+  type: 'error' | 'info'
+}
+
+function ToastContainer({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id: string) => void }) {
+  if (toasts.length === 0) return null
+  return (
+    <div className="toast-container" role="status" aria-live="polite">
+      {toasts.map(t => (
+        <div key={t.id} className={`toast toast-${t.type}`}>
+          <span>{t.message}</span>
+          <button className="toast-close" onClick={() => onDismiss(t.id)} aria-label="Dismiss">
+            <X size={12} />
+          </button>
+        </div>
+      ))}
+    </div>
+  )
+}
 
 export default function App() {
   // ── Store ────────────────────────────────────────────────────────────────
@@ -26,8 +55,8 @@ export default function App() {
   const getThread           = useChatStore(s => s.getThread)
   const editNodeUserMessage = useChatStore(s => s.editNodeUserMessage)
 
-  const ollamaBaseUrl  = useSettingsStore(s => s.ollamaBaseUrl)
-  const selectedModel  = useSettingsStore(s => s.selectedModel)
+  const providerConfigs    = useSettingsStore(s => s.providerConfigs)
+  const globalSystemPrompt = useSettingsStore(s => s.globalSystemPrompt)
 
   // ── Local UI state ───────────────────────────────────────────────────────
   const [sidebarOpen,    setSidebarOpen]    = useState(false)
@@ -36,6 +65,11 @@ export default function App() {
   const [inputValue,     setInputValue]     = useState('')
   const [canvasVisible,  setCanvasVisible]  = useState(false)
   const [canvasWidth,    setCanvasWidth]    = useState<number | null>(null)
+  const [toasts,         setToasts]         = useState<Toast[]>([])
+
+  // Pending provider+model for new conversations (before first message is sent)
+  const [pendingProvider, setPendingProvider] = useState<Provider>('ollama')
+  const [pendingModel,    setPendingModel]    = useState<string>('')
 
   // ── Context sources (Features 5 & 6) ─────────────────────────────────────
   const [pendingContextSources, setPendingContextSources] = useState<PendingContextSource[]>([])
@@ -47,6 +81,17 @@ export default function App() {
   const draggingRef  = useRef(false)
   const startXRef    = useRef(0)
   const startWRef    = useRef(0)
+
+  // ── Toast helpers ─────────────────────────────────────────────────────────
+  const showToast = useCallback((message: string, type: Toast['type'] = 'error') => {
+    const id = `${Date.now()}-${Math.random()}`
+    setToasts(prev => [...prev, { id, message, type }])
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 6000)
+  }, [])
+
+  const dismissToast = useCallback((id: string) => {
+    setToasts(prev => prev.filter(t => t.id !== id))
+  }, [])
 
   // ── Load persisted conversations on mount ─────────────────────────────
   useEffect(() => {
@@ -114,6 +159,7 @@ export default function App() {
     setInputValue('')
     setPendingContextSources([])
     setNewNodeId(null)
+    // Keep pending provider/model so user doesn't have to re-select after New Chat
   }, [])
 
   // ── Context source management ─────────────────────────────────────────
@@ -179,7 +225,6 @@ export default function App() {
         blocks.push({ label, messages })
       } else {
         // Feature 6: full history excluding common ancestors
-        // Get ancestor chain of the source node
         const nodeMap = new Map(srcConv.nodes.map(n => [n.id, n]))
         const srcAncestors: string[] = []
         let curr = srcConv.nodes.find(n => n.id === source.nodeId)
@@ -188,7 +233,6 @@ export default function App() {
           curr = curr.parentId ? nodeMap.get(curr.parentId) : undefined
         }
 
-        // Get ancestor chain of the current active node
         const activeConvNodes = state.conversations.find(c => c.id === activeConvId)?.nodes ?? []
         const activeNodeMap = new Map(activeConvNodes.map(n => [n.id, n]))
         const activeAncestors = new Set<string>()
@@ -198,7 +242,6 @@ export default function App() {
           activeCurr = activeCurr.parentId ? activeNodeMap.get(activeCurr.parentId) : undefined
         }
 
-        // Find common ancestor IDs (only relevant within same conversation)
         const commonAncestors = new Set<string>()
         if (source.conversationId === activeConvId) {
           for (const id of srcAncestors) {
@@ -206,7 +249,6 @@ export default function App() {
           }
         }
 
-        // Build messages only from non-common-ancestor nodes in the history
         const messages = []
         for (const nodeId of srcAncestors) {
           if (commonAncestors.has(nodeId)) continue
@@ -230,22 +272,33 @@ export default function App() {
     parentNodeId: string | null,
     conversationId: string | null,
   ) => {
-    if (!text.trim() || isStreaming || !selectedModel) return
+    if (!text.trim() || isStreaming) return
+
+    // Determine which conversation / provider we're using
+    const existingConv = conversationId
+      ? conversations.find(c => c.id === conversationId)
+      : null
+
+    // Use per-conversation values if available, otherwise fall back to pending (new conv)
+    const provider = existingConv?.provider ?? pendingProvider
+    const model    = existingConv?.model    ?? pendingModel
+
+    if (!model) {
+      showToast('Please select a model before sending.', 'error')
+      return
+    }
 
     // Capture context before clearing
     const contextSourcesToUse = [...pendingContextSources]
     const contextBlocks = buildContextBlocks(contextSourcesToUse, parentNodeId)
-
-    // Clear pending context
     setPendingContextSources([])
 
-    // Create conversation if this is the first message
+    // Create conversation if first message
     let convId = conversationId
     if (!convId) {
-      convId = createConversation(text)
+      convId = createConversation(text, provider, model)
     }
 
-    const model = selectedModel
     const userMsg = {
       id:        `${Date.now()}-u`,
       role:      'user' as const,
@@ -256,13 +309,19 @@ export default function App() {
 
     const contextSourcesForNode: ContextSource[] = contextSourcesToUse.map(p => p.source)
     const nodeId = addNode(convId, parentNodeId, userMsg, contextSourcesForNode)
-    setNewNodeId(nodeId)  // signal TreeCanvas to auto-focus this new node
-
-    // Show canvas immediately with processing node
+    setNewNodeId(nodeId)
     setCanvasVisible(true)
 
-    // Build thread context for LLM
     const thread = getThread(nodeId)
+
+    // Compose system prompt (global + conv override + context blocks)
+    const conv = useChatStore.getState().conversations.find(c => c.id === convId)
+    const systemPrompt = buildSystemPrompt(
+      globalSystemPrompt,
+      conv?.conversationSystemPrompt,
+      conv?.systemPromptMode,
+      contextBlocks.length > 0 ? contextBlocks : undefined,
+    )
 
     setIsStreaming(true)
     abortRef.current = new AbortController()
@@ -270,17 +329,26 @@ export default function App() {
     let accumulated = ''
 
     try {
-      await streamChat(
-        ollamaBaseUrl,
-        model,
-        thread,
-        (chunk) => {
+      if (provider === 'claude') {
+        const apiKey = providerConfigs.claude.apiKey
+        if (!apiKey) throw new Error('Invalid Claude API key — check Settings.')
+        await streamClaudeChat(apiKey, model, systemPrompt, thread, (chunk) => {
           accumulated += chunk
           updateNodeStream(convId!, nodeId, chunk)
-        },
-        abortRef.current.signal,
-        contextBlocks.length > 0 ? contextBlocks : undefined,
-      )
+        }, abortRef.current.signal)
+      } else {
+        await streamOllamaChat(
+          providerConfigs.ollama.baseUrl,
+          model,
+          systemPrompt,
+          thread,
+          (chunk) => {
+            accumulated += chunk
+            updateNodeStream(convId!, nodeId, chunk)
+          },
+          abortRef.current.signal,
+        )
+      }
 
       completeNode(convId!, nodeId, {
         id:        `${Date.now()}-a`,
@@ -292,11 +360,11 @@ export default function App() {
     } catch (err: unknown) {
       const error = err as Error
       if (error.name !== 'AbortError') {
-        // Show error in the node
+        showToast(error.message, 'error')
         completeNode(convId!, nodeId, {
           id:        `${Date.now()}-a`,
           role:      'assistant',
-          content:   `⚠️ Error: ${error.message}`,
+          content:   `⚠️ ${error.message}`,
           model,
           timestamp: Date.now(),
         })
@@ -308,24 +376,33 @@ export default function App() {
       abortRef.current = null
     }
   }, [
-    isStreaming, selectedModel, pendingContextSources, buildContextBlocks,
-    createConversation, addNode, getThread, ollamaBaseUrl,
-    updateNodeStream, completeNode, stopNode,
+    isStreaming, conversations, pendingContextSources, buildContextBlocks,
+    createConversation, addNode, getThread,
+    providerConfigs, globalSystemPrompt,
+    pendingProvider, pendingModel,
+    updateNodeStream, completeNode, stopNode, showToast,
   ])
 
   // ── Edit node (Feature 2) ─────────────────────────────────────────────
   const handleEditNode = useCallback(async (nodeId: string, newContent: string) => {
-    if (isStreaming || !selectedModel || !activeConvId) return
+    if (isStreaming || !activeConvId) return
 
-    const model = selectedModel
+    const conv = conversations.find(c => c.id === activeConvId)
+    if (!conv || !conv.model) return
 
-    // Update store: clear descendants, reset node
+    const { provider, model } = conv
+
     editNodeUserMessage(activeConvId, nodeId, newContent)
 
-    // Get the updated thread for this node
     const thread = useChatStore.getState().getThread.call(
       useChatStore.getState(),
       nodeId,
+    )
+
+    const systemPrompt = buildSystemPrompt(
+      globalSystemPrompt,
+      conv.conversationSystemPrompt,
+      conv.systemPromptMode,
     )
 
     setIsStreaming(true)
@@ -334,16 +411,26 @@ export default function App() {
     let accumulated = ''
 
     try {
-      await streamChat(
-        ollamaBaseUrl,
-        model,
-        thread,
-        (chunk) => {
+      if (provider === 'claude') {
+        const apiKey = providerConfigs.claude.apiKey
+        if (!apiKey) throw new Error('Invalid Claude API key — check Settings.')
+        await streamClaudeChat(apiKey, model, systemPrompt, thread, (chunk) => {
           accumulated += chunk
           updateNodeStream(activeConvId, nodeId, chunk)
-        },
-        abortRef.current.signal,
-      )
+        }, abortRef.current.signal)
+      } else {
+        await streamOllamaChat(
+          providerConfigs.ollama.baseUrl,
+          model,
+          systemPrompt,
+          thread,
+          (chunk) => {
+            accumulated += chunk
+            updateNodeStream(activeConvId, nodeId, chunk)
+          },
+          abortRef.current.signal,
+        )
+      }
 
       completeNode(activeConvId, nodeId, {
         id:        `${Date.now()}-a`,
@@ -355,10 +442,11 @@ export default function App() {
     } catch (err: unknown) {
       const error = err as Error
       if (error.name !== 'AbortError') {
+        showToast(error.message, 'error')
         completeNode(activeConvId, nodeId, {
           id:        `${Date.now()}-a`,
           role:      'assistant',
-          content:   `⚠️ Error: ${error.message}`,
+          content:   `⚠️ ${error.message}`,
           model,
           timestamp: Date.now(),
         })
@@ -369,11 +457,14 @@ export default function App() {
       setIsStreaming(false)
       abortRef.current = null
     }
-  }, [isStreaming, selectedModel, activeConvId, editNodeUserMessage, ollamaBaseUrl, updateNodeStream, completeNode, stopNode])
+  }, [
+    isStreaming, activeConvId, conversations, editNodeUserMessage,
+    providerConfigs, globalSystemPrompt,
+    updateNodeStream, completeNode, stopNode, showToast,
+  ])
 
   // ── Handle conversation deleted (Feature 4) ───────────────────────────
   const handleConversationDeleted = useCallback(async (conversationId: string) => {
-    // Delete from IndexedDB
     await dbDeleteConversation(conversationId)
     handleNewConversation()
   }, [handleNewConversation])
@@ -446,6 +537,11 @@ export default function App() {
             <div className="chat-header-title">
               {activeConv?.name ?? 'New conversation'}
             </div>
+            {activeConv && (
+              <div className={`provider-badge provider-badge-${activeConv.provider}`}>
+                {activeConv.provider}
+              </div>
+            )}
           </div>
 
           {/* Chat window */}
@@ -459,9 +555,16 @@ export default function App() {
             pendingContextSources={pendingContextSources}
             onRemoveContextSource={handleRemoveContextSource}
             onEditNode={handleEditNode}
+            pendingProvider={pendingProvider}
+            pendingModel={pendingModel}
+            onPendingProviderChange={setPendingProvider}
+            onPendingModelChange={setPendingModel}
           />
         </div>
       </div>
+
+      {/* Toast notifications */}
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
 
       {/* Settings modal */}
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}

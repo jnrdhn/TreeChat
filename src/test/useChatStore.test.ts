@@ -40,7 +40,7 @@ describe('getThread(nodeId)', () => {
     const root = makeNode('root', null, 'Hello')
     act(() => {
       useChatStore.setState({
-        conversations: [{ id: 'conv1', name: 'Test', nodes: [root], createdAt: 0, updatedAt: 0 }],
+        conversations: [{ id: 'conv1', name: 'Test', nodes: [root], createdAt: 0, updatedAt: 0, provider: 'ollama' as const, model: 'llama3' }],
         activeConversationId: 'conv1',
         activeNodeId: 'root',
       })
@@ -56,7 +56,7 @@ describe('getThread(nodeId)', () => {
     act(() => {
       useChatStore.setState({
         conversations: [{
-          id: 'conv1', name: 'Test', nodes: [root, child, grandchild], createdAt: 0, updatedAt: 0
+          id: 'conv1', name: 'Test', nodes: [root, child, grandchild], createdAt: 0, updatedAt: 0, provider: 'ollama' as const, model: 'llama3'
         }],
         activeConversationId: 'conv1',
         activeNodeId: 'n3',
@@ -73,7 +73,7 @@ describe('getThread(nodeId)', () => {
     act(() => {
       useChatStore.setState({
         conversations: [{
-          id: 'conv1', name: 'Test', nodes: [root, mainBranch, sideBranch], createdAt: 0, updatedAt: 0
+          id: 'conv1', name: 'Test', nodes: [root, mainBranch, sideBranch], createdAt: 0, updatedAt: 0, provider: 'ollama' as const, model: 'llama3'
         }],
         activeConversationId: 'conv1',
         activeNodeId: 'n2',
@@ -93,7 +93,7 @@ describe('addNode(conversationId, parentId, userMessage)', () => {
     act(() => {
       useChatStore.setState({
         conversations: [{
-          id: 'conv1', name: 'Test', nodes: [root], createdAt: 0, updatedAt: 0
+          id: 'conv1', name: 'Test', nodes: [root], createdAt: 0, updatedAt: 0, provider: 'ollama' as const, model: 'llama3'
         }],
         activeConversationId: 'conv1',
         activeNodeId: 'root',
@@ -125,7 +125,7 @@ describe('completeNode(conversationId, nodeId, aiMessage)', () => {
     const node = makeNode('n1', null, 'Question')
     act(() => {
       useChatStore.setState({
-        conversations: [{ id: 'conv1', name: 'Test', nodes: [node], createdAt: 0, updatedAt: 0 }],
+        conversations: [{ id: 'conv1', name: 'Test', nodes: [node], createdAt: 0, updatedAt: 0, provider: 'ollama' as const, model: 'llama3' }],
         activeConversationId: 'conv1',
         activeNodeId: 'n1',
       })
@@ -151,7 +151,7 @@ describe('stopNode(conversationId, nodeId, partialContent)', () => {
     const node = makeNode('n1', null, 'Question')
     act(() => {
       useChatStore.setState({
-        conversations: [{ id: 'conv1', name: 'Test', nodes: [node], createdAt: 0, updatedAt: 0 }],
+        conversations: [{ id: 'conv1', name: 'Test', nodes: [node], createdAt: 0, updatedAt: 0, provider: 'ollama' as const, model: 'llama3' }],
         activeConversationId: 'conv1',
         activeNodeId: 'n1',
       })

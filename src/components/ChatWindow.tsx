@@ -25,6 +25,11 @@ interface ChatWindowProps {
   pendingContextSources: PendingContextSource[]
   onRemoveContextSource: (nodeId: string) => void
   onEditNode: (nodeId: string, newContent: string) => void
+  // Pending provider/model for before the first message in a new conversation
+  pendingProvider: import('../types').Provider
+  pendingModel: string
+  onPendingProviderChange: (p: import('../types').Provider) => void
+  onPendingModelChange: (m: string) => void
 }
 
 // ── Bubble action buttons ────────────────────────────────────────────────────
@@ -196,6 +201,10 @@ export function ChatWindow({
   pendingContextSources,
   onRemoveContextSource,
   onEditNode,
+  pendingProvider,
+  pendingModel,
+  onPendingProviderChange,
+  onPendingModelChange,
 }: ChatWindowProps) {
   const getThread       = useChatStore(s => s.getThread)
   const activeNodeId    = useChatStore(s => s.activeNodeId)
@@ -300,7 +309,12 @@ export function ChatWindow({
             <button className="btn-icon-ghost" aria-label="Library"><BookOpen size={18} /></button>
           </div>
           <div className="chat-input-actions-right">
-            <ModelSelector />
+            <ModelSelector
+              pendingProvider={pendingProvider}
+              pendingModel={pendingModel}
+              onPendingProviderChange={onPendingProviderChange}
+              onPendingModelChange={onPendingModelChange}
+            />
             {isStreaming ? (
               <button className="btn-stop" onClick={onStop} id="btn-stop" aria-label="Stop generation">
                 <Square size={14} />

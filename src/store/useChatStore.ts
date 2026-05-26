@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Conversation, ConversationNode, ContextSource, Message } from '../types'
+import type { Conversation, ConversationNode, ContextSource, Message, Provider, SystemPromptMode } from '../types'
 
 // ─── Branch Color Palette ─────────────────────────────────────────────────────
 
@@ -63,7 +63,18 @@ interface ChatStoreState {
   getAncestors: (conversationId: string, nodeId: string) => ConversationNode[]
 
   // Actions
-  createConversation: (firstUserMessage: string) => string
+  createConversation: (
+    firstUserMessage: string,
+    provider?: Provider,
+    model?: string,
+    conversationSystemPrompt?: string,
+    systemPromptMode?: SystemPromptMode
+  ) => string
+  setConversationSystemPrompt: (
+    conversationId: string,
+    prompt: string,
+    mode: SystemPromptMode
+  ) => void
   addNode: (
     conversationId: string,
     parentId: string | null,
@@ -133,7 +144,7 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
 
   // ── Actions ────────────────────────────────────────────────────────────────
 
-  createConversation(firstUserMessage) {
+  createConversation(firstUserMessage, provider = 'ollama', model = '', conversationSystemPrompt, systemPromptMode) {
     const id = generateId()
     const name = firstUserMessage.trim().split(/\s+/).slice(0, 5).join(' ')
     const newConv: Conversation = {
@@ -142,6 +153,10 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
       nodes: [],
       createdAt: Date.now(),
       updatedAt: Date.now(),
+      provider,
+      model,
+      conversationSystemPrompt,
+      systemPromptMode,
     }
     set(state => ({
       conversations: [newConv, ...state.conversations],
@@ -149,6 +164,16 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
       activeNodeId: null,
     }))
     return id
+  },
+
+  setConversationSystemPrompt(conversationId, prompt, mode) {
+    set(state => ({
+      conversations: state.conversations.map(c =>
+        c.id === conversationId
+          ? { ...c, conversationSystemPrompt: prompt, systemPromptMode: mode, updatedAt: Date.now() }
+          : c
+      ),
+    }))
   },
 
   addNode(conversationId, parentId, userMessage, contextSources) {

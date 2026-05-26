@@ -2,6 +2,8 @@
 
 export type MessageRole = 'user' | 'assistant'
 
+export type Provider = 'ollama' | 'claude'
+
 export interface Message {
   id: string
   role: MessageRole
@@ -29,10 +31,18 @@ export interface ConversationNode {
   showContextLines?: boolean          // whether to render gray dashed lines on canvas
 }
 
+export type SystemPromptMode = 'append' | 'replace'
+
 export interface Conversation {
   id: string
   name: string   // auto-set from first user message; editable
   nodes: ConversationNode[]
   createdAt: number
   updatedAt: number
+  // Provider & model (per-conversation)
+  provider: Provider
+  model: string
+  // Optional per-conversation system prompt override
+  conversationSystemPrompt?: string
+  systemPromptMode?: SystemPromptMode  // 'append' = prepend global, 'replace' = ignore global
 }

@@ -1,73 +1,94 @@
-# React + TypeScript + Vite
+# 🌿 TreeChat
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+**Branching AI Conversations.** Explore, branch, and visualize your thoughts as an interactive tree.
 
-Currently, two official plugins are available:
+TreeChat is a modern, privacy-focused chat interface for Large Language Models. Instead of linear chat histories that lock you into a single path, TreeChat lets you branch out at any point, experiment with different prompts, and visualize the entire conversation as a living, growing tree.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## ✨ Features
 
-## React Compiler
+- **🌳 Interactive Tree Canvas**: Every conversation is a tree. Pan, zoom, and drag around your conversation history using a beautifully rendered node graph.
+- **🔀 Seamless Branching**: Want to see what happens if you tweak a prompt? Just edit a node or reply to an older message to instantly create a new branch. You never lose your train of thought.
+- **🧠 Advanced Context Control**: Inject specific nodes or entire historical branches into your current context, allowing for complex, multi-threaded reasoning.
+- **🔌 Multi-Model Support**:
+  - **Ollama**: Connects seamlessly to your local Ollama instance for fast, private, offline inference.
+  - **Claude (Anthropic)**: Full support for Anthropic's Claude API.
+- **💾 Local First & Private**: Your conversations never leave your machine. Everything is stored locally in your browser via IndexedDB.
+- **💅 Premium Aesthetics**: A modern, dark-mode UI with glassmorphism, smooth animations, and a polished user experience.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## 🚀 Getting Started
 
-## Expanding the ESLint configuration
+### Prerequisites
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+- [Node.js](https://nodejs.org/) (v18 or higher)
+- [Ollama](https://ollama.com/) (if you plan to run models locally)
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+### Installation
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/yourusername/TreeChat.git
+   cd TreeChat
+   ```
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+2. **Install dependencies:**
+   ```bash
+   npm install
+   ```
+
+3. **Start the development server:**
+   ```bash
+   npm run dev
+   ```
+   The application will be available at [http://localhost:5173](http://localhost:5173).
+
+### Configuring Ollama (Important)
+
+For TreeChat to communicate with your local Ollama instance from the browser, you **must** enable Cross-Origin Resource Sharing (CORS) on the Ollama server.
+
+Start Ollama with the `OLLAMA_ORIGINS` environment variable:
+
+**Mac/Linux:**
+```bash
+OLLAMA_ORIGINS="*" ollama serve
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+**Windows (Command Prompt):**
+```cmd
+set OLLAMA_ORIGINS="*"
+ollama serve
 ```
+
+**Windows (PowerShell):**
+```powershell
+$env:OLLAMA_ORIGINS="*"
+ollama serve
+```
+
+## 🛠️ Built With
+
+- **[React](https://react.dev/) + [Vite](https://vitejs.dev/)**: For a blazing fast frontend experience.
+- **[Zustand](https://zustand-demo.pmnd.rs/)**: For simple, predictable global state management.
+- **[React Flow](https://reactflow.dev/)**: Powers the interactive, draggable node canvas.
+- **[Dagre](https://github.com/dagrejs/dagre)**: Handles the automatic, top-down tree layout.
+- **[IndexedDB (idb)](https://github.com/jakearchibald/idb)**: Ensures robust, fast local persistence.
+
+## 💡 How to Use
+
+1. **Start a Chat:** Open the app and select your model (Ollama or Claude) from the dropdown. Type your first message to kick off the tree.
+2. **Branch Out:** Double-click on any message in the chat history to branch from it, or edit your previous prompts to see how the AI responds differently.
+3. **Manage Context:** Use the "Network" or "Fork" icons on the nodes in the canvas to feed different parts of the tree as context into your current active branch.
+4. **Settings:** Click the gear icon in the sidebar to configure your Ollama Base URL, add your Claude API key, or define global system prompts.
+
+## 🤝 Contributing
+
+Contributions are what make the open-source community such an amazing place to learn, inspire, and create. Any contributions you make are **greatly appreciated**.
+
+1. Fork the Project
+2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the Branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
+
+## 📄 License
+
+Distributed under the MIT License. See `LICENSE` for more information.
