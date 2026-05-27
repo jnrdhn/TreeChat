@@ -4,12 +4,33 @@ export type MessageRole = 'user' | 'assistant'
 
 export type Provider = 'ollama' | 'claude'
 
+// ── Attachments ───────────────────────────────────────────────────────────────
+
+export type AttachmentKind = 'image' | 'file'
+
+export interface Attachment {
+  id: string
+  name: string
+  mimeType: string
+  kind: AttachmentKind
+  /** base64 data-URL for images; used as vision block content */
+  dataUrl: string
+  /** Plain-text extracted from the file; injected into the prompt for non-image files */
+  extractedText?: string
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export interface Message {
   id: string
   role: MessageRole
   content: string
   model: string
   timestamp: number
+  /** Files/images attached to this user message */
+  attachments?: Attachment[]
+  /** Claude extended-thinking reasoning trace (assistant messages only) */
+  thinkingContent?: string
 }
 
 export type NodeStatus = 'processing' | 'complete' | 'stopped'

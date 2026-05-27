@@ -2,9 +2,27 @@ import type { ConversationNode } from '../types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+/** Anthropic vision content block (image) */
+export interface AnthropicImageBlock {
+  type: 'image'
+  source: {
+    type: 'base64'
+    media_type: string
+    data: string  // base64 without the data-URL prefix
+  }
+}
+
+/** Anthropic text content block */
+export interface AnthropicTextBlock {
+  type: 'text'
+  text: string
+}
+
+export type AnthropicContentBlock = AnthropicTextBlock | AnthropicImageBlock
+
 export interface LLMMessage {
   role: 'user' | 'assistant' | 'system'
-  content: string
+  content: string | AnthropicContentBlock[]
 }
 
 export interface ContextBlock {
@@ -114,11 +132,46 @@ export async function fetchClaudeModels(apiKey: string): Promise<string[]> {
 /**
  * Flattens a thread of ConversationNodes into an ordered array of LLM messages.
  * Each node contributes a user message and (if complete) an assistant message.
+ *
+ * When a user message carries image attachments, the content is emitted as an
+ * Anthropic multi-part content array (text + image blocks).
+ * Non-image file text is prepended to the text content block.
  */
 export function threadToMessages(thread: ConversationNode[]): LLMMessage[] {
   const messages: LLMMessage[] = []
   for (const node of thread) {
-    messages.push({ role: 'user', content: node.userMessage.content })
+    const { content, attachments } = node.userMessage
+
+    if (attachments && attachments.length > 0) {
+      // Build a multi-part Anthropic content array
+      const blocks: AnthropicContentBlock[] = []
+
+      // Prepend text from non-image file attachments
+      const fileTexts = attachments
+        .filter(a => a.kind === 'file' && a.extractedText)
+        .map(a => `[Attached file: ${a.name}]\n${a.extractedText}`)
+        .join('\n\n')
+
+      const textContent = fileTexts ? `${fileTexts}\n\n${content}` : content
+      blocks.push({ type: 'text', text: textContent })
+
+      // Add image blocks (images only)
+      for (const att of attachments) {
+        if (att.kind === 'image') {
+          // Strip "data:<mime>;base64," prefix
+          const base64 = att.dataUrl.split(',')[1] ?? att.dataUrl
+          blocks.push({
+            type: 'image',
+            source: { type: 'base64', media_type: att.mimeType, data: base64 },
+          })
+        }
+      }
+
+      messages.push({ role: 'user', content: blocks })
+    } else {
+      messages.push({ role: 'user', content })
+    }
+
     if (node.aiMessage) {
       messages.push({ role: 'assistant', content: node.aiMessage.content })
     }
@@ -219,17 +272,22 @@ export async function streamClaudeChat(
   thread: ConversationNode[],
   onChunk: (chunk: string) => void,
   signal?: AbortSignal,
+  thinkingEnabled?: boolean,
+  onThinkingChunk?: (chunk: string) => void,
 ): Promise<void> {
   const messages = threadToMessages(thread)
 
   const body: Record<string, unknown> = {
     model,
     messages,
-    max_tokens: 8096,
+    max_tokens: thinkingEnabled ? 16000 : 8096,
     stream: true,
   }
   if (systemPrompt) {
     body.system = systemPrompt
+  }
+  if (thinkingEnabled) {
+    body.thinking = { type: 'enabled', budget_tokens: 8000 }
   }
 
   const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -238,6 +296,7 @@ export async function streamClaudeChat(
       'Content-Type': 'application/json',
       'x-api-key': apiKey,
       'anthropic-version': '2023-06-01',
+      'anthropic-beta': 'interleaved-thinking-2025-05-14',
       'anthropic-dangerous-direct-browser-access': 'true',
     },
     body: JSON.stringify(body),
@@ -251,6 +310,9 @@ export async function streamClaudeChat(
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
+
+  // Track which content block index is a thinking block vs text block
+  const blockTypes = new Map<number, 'thinking' | 'text'>()
 
   while (true) {
     const { done, value } = await reader.read()
@@ -269,12 +331,27 @@ export async function streamClaudeChat(
         if (jsonStr === '[DONE]') return
         try {
           const parsed = JSON.parse(jsonStr)
-          // content_block_delta carries text chunks
-          if (
-            parsed.type === 'content_block_delta' &&
-            parsed.delta?.type === 'text_delta'
-          ) {
-            onChunk(parsed.delta.text)
+
+          // Track block types when they start
+          if (parsed.type === 'content_block_start') {
+            const idx = parsed.index as number
+            const blockType = parsed.content_block?.type as string
+            if (blockType === 'thinking') blockTypes.set(idx, 'thinking')
+            else if (blockType === 'text') blockTypes.set(idx, 'text')
+          }
+
+          // Route deltas to the right callback
+          if (parsed.type === 'content_block_delta') {
+            const idx = parsed.index as number
+            const deltaType = parsed.delta?.type as string
+            if (deltaType === 'thinking_delta' && onThinkingChunk) {
+              onThinkingChunk(parsed.delta.thinking ?? '')
+            } else if (deltaType === 'text_delta') {
+              // Confirm it's a text block (not thinking)
+              if (blockTypes.get(idx) !== 'thinking') {
+                onChunk(parsed.delta.text ?? '')
+              }
+            }
           }
         } catch {
           // Ignore malformed SSE lines

@@ -13,7 +13,7 @@ import { Sidebar } from './components/Sidebar'
 import { TreeCanvas } from './components/TreeCanvas'
 import { ChatWindow, type PendingContextSource } from './components/ChatWindow'
 import { SettingsModal } from './components/SettingsModal'
-import type { ContextSource, Provider } from './types'
+import type { Attachment, ContextSource, Provider } from './types'
 import './index.css'
 
 const MIN_CANVAS_WIDTH = 280
@@ -50,6 +50,7 @@ export default function App() {
   const createConversation  = useChatStore(s => s.createConversation)
   const addNode             = useChatStore(s => s.addNode)
   const updateNodeStream    = useChatStore(s => s.updateNodeStream)
+  const updateNodeThinking  = useChatStore(s => s.updateNodeThinking)
   const completeNode        = useChatStore(s => s.completeNode)
   const stopNode            = useChatStore(s => s.stopNode)
   const getThread           = useChatStore(s => s.getThread)
@@ -70,6 +71,10 @@ export default function App() {
   // Pending provider+model for new conversations (before first message is sent)
   const [pendingProvider, setPendingProvider] = useState<Provider>('ollama')
   const [pendingModel,    setPendingModel]    = useState<string>('')
+
+  // Pending attachments and thinking toggle (live in ChatWindow, lifted for send)
+  const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([])
+  const [thinkingEnabled,    setThinkingEnabled]    = useState(false)
 
   // ── Context sources (Features 5 & 6) ─────────────────────────────────────
   const [pendingContextSources, setPendingContextSources] = useState<PendingContextSource[]>([])
@@ -158,6 +163,7 @@ export default function App() {
     setCanvasWidth(null)
     setInputValue('')
     setPendingContextSources([])
+    setPendingAttachments([])
     setNewNodeId(null)
     // Keep pending provider/model so user doesn't have to re-select after New Chat
   }, [])
@@ -271,6 +277,8 @@ export default function App() {
     text: string,
     parentNodeId: string | null,
     conversationId: string | null,
+    attachments: Attachment[] = [],
+    isThinkingEnabled: boolean = false,
   ) => {
     if (!text.trim() || isStreaming) return
 
@@ -292,6 +300,7 @@ export default function App() {
     const contextSourcesToUse = [...pendingContextSources]
     const contextBlocks = buildContextBlocks(contextSourcesToUse, parentNodeId)
     setPendingContextSources([])
+    setPendingAttachments([])
 
     // Create conversation if first message
     let convId = conversationId
@@ -300,11 +309,12 @@ export default function App() {
     }
 
     const userMsg = {
-      id:        `${Date.now()}-u`,
-      role:      'user' as const,
-      content:   text,
+      id:          `${Date.now()}-u`,
+      role:        'user' as const,
+      content:     text,
       model,
-      timestamp: Date.now(),
+      timestamp:   Date.now(),
+      attachments: attachments.length > 0 ? attachments : undefined,
     }
 
     const contextSourcesForNode: ContextSource[] = contextSourcesToUse.map(p => p.source)
@@ -327,15 +337,25 @@ export default function App() {
     abortRef.current = new AbortController()
 
     let accumulated = ''
+    let accumulatedThinking = ''
 
     try {
       if (provider === 'claude') {
         const apiKey = providerConfigs.claude.apiKey
         if (!apiKey) throw new Error('Invalid Claude API key — check Settings.')
-        await streamClaudeChat(apiKey, model, systemPrompt, thread, (chunk) => {
-          accumulated += chunk
-          updateNodeStream(convId!, nodeId, chunk)
-        }, abortRef.current.signal)
+        await streamClaudeChat(
+          apiKey, model, systemPrompt, thread,
+          (chunk) => {
+            accumulated += chunk
+            updateNodeStream(convId!, nodeId, chunk)
+          },
+          abortRef.current.signal,
+          isThinkingEnabled,
+          (thinkChunk) => {
+            accumulatedThinking += thinkChunk
+            updateNodeThinking(convId!, nodeId, thinkChunk)
+          },
+        )
       } else {
         await streamOllamaChat(
           providerConfigs.ollama.baseUrl,
@@ -351,11 +371,12 @@ export default function App() {
       }
 
       completeNode(convId!, nodeId, {
-        id:        `${Date.now()}-a`,
-        role:      'assistant',
-        content:   accumulated,
+        id:             `${Date.now()}-a`,
+        role:           'assistant',
+        content:        accumulated,
         model,
-        timestamp: Date.now(),
+        timestamp:      Date.now(),
+        thinkingContent: accumulatedThinking || undefined,
       })
     } catch (err: unknown) {
       const error = err as Error
@@ -380,7 +401,7 @@ export default function App() {
     createConversation, addNode, getThread,
     providerConfigs, globalSystemPrompt,
     pendingProvider, pendingModel,
-    updateNodeStream, completeNode, stopNode, showToast,
+    updateNodeStream, updateNodeThinking, completeNode, stopNode, showToast,
   ])
 
   // ── Edit node (Feature 2) ─────────────────────────────────────────────
@@ -559,6 +580,11 @@ export default function App() {
             pendingModel={pendingModel}
             onPendingProviderChange={setPendingProvider}
             onPendingModelChange={setPendingModel}
+            pendingAttachments={pendingAttachments}
+            onPendingAttachmentsChange={setPendingAttachments}
+            thinkingEnabled={thinkingEnabled}
+            onThinkingToggle={() => setThinkingEnabled(v => !v)}
+            onError={msg => showToast(msg, 'error')}
           />
         </div>
       </div>

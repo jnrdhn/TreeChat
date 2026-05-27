@@ -82,6 +82,7 @@ interface ChatStoreState {
     contextSources?: ContextSource[]
   ) => string
   updateNodeStream: (conversationId: string, nodeId: string, chunk: string) => void
+  updateNodeThinking: (conversationId: string, nodeId: string, chunk: string) => void
   completeNode: (conversationId: string, nodeId: string, aiMessage: Message) => void
   stopNode: (conversationId: string, nodeId: string, partialContent: string, model: string) => void
   setActiveConversation: (conversationId: string) => void
@@ -219,6 +220,32 @@ export const useChatStore = create<ChatStoreState>((set, get) => ({
     }))
 
     return newNode.id
+  },
+
+  updateNodeThinking(conversationId, nodeId, chunk) {
+    set(state => ({
+      conversations: state.conversations.map(c => {
+        if (c.id !== conversationId) return c
+        return {
+          ...c,
+          nodes: c.nodes.map(n => {
+            if (n.id !== nodeId) return n
+            const existing = n.aiMessage?.thinkingContent ?? ''
+            return {
+              ...n,
+              aiMessage: {
+                id: n.aiMessage?.id ?? generateId(),
+                role: 'assistant',
+                content: n.aiMessage?.content ?? '',
+                model: n.aiMessage?.model ?? '',
+                timestamp: n.aiMessage?.timestamp ?? Date.now(),
+                thinkingContent: existing + chunk,
+              },
+            }
+          }),
+        }
+      }),
+    }))
   },
 
   updateNodeStream(conversationId, nodeId, chunk) {

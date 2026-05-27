@@ -1,13 +1,14 @@
-import { useEffect, useRef, useMemo, useState } from 'react'
+import { useEffect, useRef, useMemo, useState, useCallback } from 'react'
+import heic2any from 'heic2any'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
   ArrowUp, Square, GitBranch, Bot, Plus, Lightbulb,
   MessageSquareDashed, BookOpen, Copy, Pencil, Check,
-  X, Network, GitFork, AlertTriangle
+  X, Network, GitFork, AlertTriangle, Brain, FileText, UploadCloud,
 } from 'lucide-react'
 import { useChatStore } from '../store/useChatStore'
-import type { ConversationNode, ContextSource } from '../types'
+import type { Attachment, ConversationNode, ContextSource } from '../types'
 import { ModelSelector } from './ModelSelector'
 
 export interface PendingContextSource {
@@ -16,7 +17,13 @@ export interface PendingContextSource {
 }
 
 interface ChatWindowProps {
-  onSend: (text: string, parentNodeId: string | null, conversationId: string | null) => void
+  onSend: (
+    text: string,
+    parentNodeId: string | null,
+    conversationId: string | null,
+    attachments: Attachment[],
+    thinkingEnabled: boolean,
+  ) => void
   isStreaming: boolean
   onStop: () => void
   inputValue: string
@@ -30,6 +37,14 @@ interface ChatWindowProps {
   pendingModel: string
   onPendingProviderChange: (p: import('../types').Provider) => void
   onPendingModelChange: (m: string) => void
+  // Attachments
+  pendingAttachments: Attachment[]
+  onPendingAttachmentsChange: (atts: Attachment[]) => void
+  // Thinking toggle
+  thinkingEnabled: boolean
+  onThinkingToggle: () => void
+  // Error reporting (for unsupported drag-drop file types)
+  onError?: (message: string) => void
 }
 
 // ── Bubble action buttons ────────────────────────────────────────────────────
@@ -140,6 +155,26 @@ function UserBubble({ node, hasChildren, childCount, onEdit }: UserBubbleProps) 
 
       {editMode === 'idle' && (
         <div className="bubble">
+          {/* Inline attachment display */}
+          {node.userMessage.attachments && node.userMessage.attachments.length > 0 && (
+            <div className="bubble-attachments">
+              {node.userMessage.attachments.map(att =>
+                att.kind === 'image' ? (
+                  <img
+                    key={att.id}
+                    src={att.dataUrl}
+                    alt={att.name}
+                    className="bubble-attachment-image"
+                  />
+                ) : (
+                  <div key={att.id} className="bubble-attachment-file">
+                    <FileText size={12} />
+                    <span>{att.name}</span>
+                  </div>
+                )
+              )}
+            </div>
+          )}
           {node.userMessage.content}
         </div>
       )}
@@ -154,6 +189,58 @@ function UserBubble({ node, hasChildren, childCount, onEdit }: UserBubbleProps) 
         </div>
       )}
     </div>
+  )
+}
+
+// ── Attachment preview bar ────────────────────────────────────────────────────
+
+function AttachmentPreviewBar({
+  attachments,
+  onRemove,
+}: {
+  attachments: Attachment[]
+  onRemove: (id: string) => void
+}) {
+  if (attachments.length === 0) return null
+  return (
+    <div className="attachment-preview-bar">
+      {attachments.map(att => (
+        <div key={att.id} className="attachment-preview-item">
+          {att.kind === 'image' ? (
+            <img src={att.dataUrl} alt={att.name} className="attachment-thumb" />
+          ) : (
+            <div className="attachment-file-icon">
+              <FileText size={16} />
+            </div>
+          )}
+          <span className="attachment-preview-name">{att.name}</span>
+          <button
+            className="attachment-remove-btn"
+            onClick={() => onRemove(att.id)}
+            title="Remove attachment"
+            aria-label={`Remove ${att.name}`}
+          >
+            <X size={10} />
+          </button>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── Thinking block ─────────────────────────────────────────────────────────────
+
+function ThinkingBlock({ content }: { content: string }) {
+  return (
+    <details className="thinking-block">
+      <summary className="thinking-block-summary">
+        <Brain size={12} />
+        <span>Thinking…</span>
+      </summary>
+      <div className="thinking-block-body">
+        <pre className="thinking-block-content">{content}</pre>
+      </div>
+    </details>
   )
 }
 
@@ -191,6 +278,25 @@ function ContextSourcesBar({
 
 // ── Main ChatWindow ───────────────────────────────────────────────────────────
 
+// ── Allowed MIME types / extensions (mirrors the <input accept> list) ─────────
+const ALLOWED_MIME_PREFIXES = ['image/', 'text/']
+const ALLOWED_EXTENSIONS    = ['.pdf', '.md', '.txt', '.csv', '.json']
+const HEIC_EXTENSIONS       = ['.heic', '.heif']
+
+function isHeicFile(file: File): boolean {
+  const lower = file.name.toLowerCase()
+  return HEIC_EXTENSIONS.some(ext => lower.endsWith(ext))
+    || file.type === 'image/heic'
+    || file.type === 'image/heif'
+}
+
+function isAllowedFile(file: File): boolean {
+  if (isHeicFile(file)) return true
+  if (ALLOWED_MIME_PREFIXES.some(p => file.type.startsWith(p))) return true
+  const lower = file.name.toLowerCase()
+  return ALLOWED_EXTENSIONS.some(ext => lower.endsWith(ext))
+}
+
 export function ChatWindow({
   onSend,
   isStreaming,
@@ -205,6 +311,11 @@ export function ChatWindow({
   pendingModel,
   onPendingProviderChange,
   onPendingModelChange,
+  pendingAttachments,
+  onPendingAttachmentsChange,
+  thinkingEnabled,
+  onThinkingToggle,
+  onError,
 }: ChatWindowProps) {
   const getThread       = useChatStore(s => s.getThread)
   const activeNodeId    = useChatStore(s => s.activeNodeId)
@@ -214,6 +325,9 @@ export function ChatWindow({
   const nodeRefs        = useRef<Record<string, HTMLDivElement | null>>({})
   const textareaRef     = useRef<HTMLTextAreaElement>(null)
   const prevActiveRef   = useRef<string | null>(null)
+  const fileInputRef    = useRef<HTMLInputElement>(null)
+  const [isDragOver, setIsDragOver] = useState(false)
+  const dragCounterRef = useRef(0)  // tracks nested dragenter/dragleave
 
   // Derive thread from active node
   const thread: ConversationNode[] = useMemo(
@@ -274,11 +388,129 @@ export function ChatWindow({
   const handleSend = () => {
     const text = inputValue.trim()
     if (!text || isStreaming) return
-    onSend(text, activeNodeId, activeConversationId)
+    onSend(text, activeNodeId, activeConversationId, pendingAttachments, thinkingEnabled)
     onInputChange('')
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto'
     }
+  }
+
+  // ── Shared file processor (used by both + button and drag-drop) ───────────
+  const processFiles = useCallback((files: File[]) => {
+    const accepted: File[] = []
+    const rejected: string[] = []
+
+    for (const file of files) {
+      if (isAllowedFile(file)) {
+        accepted.push(file)
+      } else {
+        rejected.push(file.name)
+      }
+    }
+
+    if (rejected.length > 0) {
+      onError?.(`Unsupported file type${rejected.length > 1 ? 's' : ''}: ${rejected.join(', ')}`)
+    }
+
+    accepted.forEach(file => {
+      const isImage = file.type.startsWith('image/') || isHeicFile(file)
+
+      if (isHeicFile(file)) {
+        // Convert HEIC/HEIF → JPEG in-browser so it can be displayed and sent
+        heic2any({ blob: file, toType: 'image/jpeg', quality: 0.92 })
+          .then(converted => {
+            const blob = Array.isArray(converted) ? converted[0] : converted
+            const reader = new FileReader()
+            reader.onload = () => {
+              const baseName = file.name.replace(/\.(heic|heif)$/i, '.jpg')
+              const att: Attachment = {
+                id:       `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+                name:     baseName,
+                mimeType: 'image/jpeg',
+                kind:     'image',
+                dataUrl:  reader.result as string,
+              }
+              onPendingAttachmentsChange([...pendingAttachments, att])
+            }
+            reader.readAsDataURL(blob)
+          })
+          .catch(() => {
+            onError?.(`Could not convert HEIC file: ${file.name}`)
+          })
+        return
+      }
+
+      const reader = new FileReader()
+
+      if (isImage) {
+        reader.onload = () => {
+          const att: Attachment = {
+            id:       `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            name:     file.name,
+            mimeType: file.type,
+            kind:     'image',
+            dataUrl:  reader.result as string,
+          }
+          onPendingAttachmentsChange([...pendingAttachments, att])
+        }
+        reader.readAsDataURL(file)
+      } else {
+        reader.onload = () => {
+          const att: Attachment = {
+            id:            `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            name:          file.name,
+            mimeType:      file.type || 'text/plain',
+            kind:          'file',
+            dataUrl:       '',
+            extractedText: reader.result as string,
+          }
+          onPendingAttachmentsChange([...pendingAttachments, att])
+        }
+        reader.readAsText(file)
+      }
+    })
+  }, [pendingAttachments, onPendingAttachmentsChange, onError])
+
+  // File picker handler
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? [])
+    if (files.length === 0) return
+    e.target.value = ''
+    processFiles(files)
+  }
+
+  // ── Drag-and-drop handlers ─────────────────────────────────────────────────
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    dragCounterRef.current += 1
+    if (dragCounterRef.current === 1) setIsDragOver(true)
+  }
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    dragCounterRef.current -= 1
+    if (dragCounterRef.current === 0) setIsDragOver(false)
+  }
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    e.dataTransfer.dropEffect = 'copy'
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    dragCounterRef.current = 0
+    setIsDragOver(false)
+    const files = Array.from(e.dataTransfer.files)
+    if (files.length > 0) processFiles(files)
+  }
+
+  const handleRemoveAttachment = (id: string) => {
+    onPendingAttachmentsChange(pendingAttachments.filter(a => a.id !== id))
   }
 
   // Shared input area
@@ -291,7 +523,19 @@ export function ChatWindow({
         </div>
       )}
       <ContextSourcesBar sources={pendingContextSources} onRemove={onRemoveContextSource} />
+      <AttachmentPreviewBar attachments={pendingAttachments} onRemove={handleRemoveAttachment} />
       <div className="chat-input-box">
+        {/* Hidden file input */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*,.heic,.heif,text/*,.pdf,.md,.txt,.csv,.json"
+          multiple
+          style={{ display: 'none' }}
+          onChange={handleFileChange}
+          id="attachment-file-input"
+          aria-label="Attach files"
+        />
         <textarea
           ref={textareaRef}
           className="chat-textarea"
@@ -303,10 +547,31 @@ export function ChatWindow({
         />
         <div className="chat-input-bottom-row">
           <div className="chat-input-actions-left">
-            <button className="btn-icon-ghost" aria-label="Add attachment"><Plus size={18} /></button>
-            <button className="btn-icon-ghost" aria-label="Use prompt template"><Lightbulb size={18} /></button>
-            <button className="btn-icon-ghost" aria-label="Open chat settings"><MessageSquareDashed size={18} /></button>
-            <button className="btn-icon-ghost" aria-label="Library"><BookOpen size={18} /></button>
+            <button
+              className="btn-icon-ghost"
+              aria-label="Add attachment"
+              id="btn-attachment"
+              onClick={() => fileInputRef.current?.click()}
+              title="Attach photo or file"
+            >
+              <Plus size={18} />
+            </button>
+            <button
+              className={`btn-icon-ghost${thinkingEnabled && pendingProvider === 'claude' ? ' thinking-toggle-active' : ''}`}
+              aria-label={thinkingEnabled ? 'Disable thinking' : 'Enable thinking'}
+              id="btn-thinking-toggle"
+              onClick={pendingProvider === 'claude' ? onThinkingToggle : undefined}
+              disabled={pendingProvider !== 'claude'}
+              title={pendingProvider === 'claude' ? (thinkingEnabled ? 'Thinking on' : 'Thinking off') : 'Thinking only available with Claude'}
+            >
+              <Lightbulb size={18} />
+            </button>
+            <button className="btn-icon-ghost" aria-label="Open chat settings" title="Chat settings">
+              <MessageSquareDashed size={18} />
+            </button>
+            <button className="btn-icon-ghost" aria-label="Library" title="Library">
+              <BookOpen size={18} />
+            </button>
           </div>
           <div className="chat-input-actions-right">
             <ModelSelector
@@ -323,7 +588,7 @@ export function ChatWindow({
               <button
                 className="btn-send"
                 onClick={handleSend}
-                disabled={!inputValue.trim()}
+                disabled={!inputValue.trim() && pendingAttachments.length === 0}
                 id="btn-send"
                 aria-label="Send message"
               >
@@ -336,9 +601,26 @@ export function ChatWindow({
     </div>
   )
 
+  const dropOverlay = isDragOver && (
+    <div className="drop-overlay" aria-hidden>
+      <div className="drop-overlay-inner">
+        <UploadCloud size={36} className="drop-overlay-icon" />
+        <span className="drop-overlay-label">Drop files here</span>
+        <span className="drop-overlay-hint">Images, text, PDF, CSV, JSON</span>
+      </div>
+    </div>
+  )
+
   if (thread.length === 0) {
     return (
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div
+        style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}
+        onDragEnter={handleDragEnter}
+        onDragLeave={handleDragLeave}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
+      >
+        {dropOverlay}
         <div className="chat-messages">
           <div className="chat-empty">
             <div className="chat-empty-icon">
@@ -354,7 +636,14 @@ export function ChatWindow({
   }
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div
+      style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
+      {dropOverlay}
       <div className="chat-messages">
         {thread.map((node, idx) => {
           const prevNode = idx > 0 ? thread[idx - 1] : null
@@ -396,6 +685,10 @@ export function ChatWindow({
                         <Bot size={9} />
                         {node.aiMessage?.model ?? '…'}
                       </div>
+                      {/* Thinking block (collapsible) */}
+                      {node.aiMessage?.thinkingContent && (
+                        <ThinkingBlock content={node.aiMessage.thinkingContent} />
+                      )}
                       <div className="message-ai-bubble">
                         <ReactMarkdown remarkPlugins={[remarkGfm]}>
                           {node.aiMessage?.content ?? ''}
