@@ -2,7 +2,13 @@
 
 **Branching AI Conversations.** Explore, branch, and visualize your thoughts as an interactive tree.
 
+[![Deploy to GitHub Pages](https://github.com/jnrdhn/TreeChat/actions/workflows/deploy.yml/badge.svg)](https://github.com/jnrdhn/TreeChat/actions/workflows/deploy.yml)
+
+🌐 **[Try it live → jnrdhn.github.io/TreeChat](https://jnrdhn.github.io/TreeChat/)**
+
 TreeChat is a modern, privacy-focused chat interface for Large Language Models. Instead of linear chat histories that lock you into a single path, TreeChat lets you branch out at any point, experiment with different prompts, and visualize the entire conversation as a living, growing tree.
+
+> **Privacy note:** All conversations are stored exclusively in your browser's IndexedDB — no account, no server, no data ever leaves your machine.
 
 ## ✨ Features
 
@@ -19,6 +25,13 @@ TreeChat is a modern, privacy-focused chat interface for Large Language Models. 
 ## 📸 Preview
 
 > Add a screenshot or GIF of the node canvas here — contributions welcome!
+
+## 🌐 Live Demo
+
+No installation needed. Open **[jnrdhn.github.io/TreeChat](https://jnrdhn.github.io/TreeChat/)** in your browser and start chatting.
+
+- Bring your own **Claude API key** (added in Settings ⚙️), or
+- Point it at a local **Ollama** instance for fully offline inference.
 
 ## 🚀 Getting Started
 
@@ -87,6 +100,20 @@ ollama serve
 4. **Edit past messages** — Hover over a user bubble in the chat and click the ✏️ icon to edit it inline. The AI re-generates from that point.
 5. **Inject cross-branch context** — Click the **Network** icon on a node to use that node's content as context, or the **Fork** icon to inject its full history. Pills appear in the input bar confirming what's included.
 6. **Configure providers** — Click the ⚙️ gear icon in the sidebar to set your Ollama URL, add a Claude API key, or write a global system prompt.
+
+## 🚀 Deployment
+
+TreeChat is automatically deployed to GitHub Pages on every push to `main`.
+
+| What | Detail |
+|---|---|
+| Hosting | GitHub Pages |
+| Live URL | [jnrdhn.github.io/TreeChat](https://jnrdhn.github.io/TreeChat/) |
+| CI/CD | GitHub Actions ([`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)) |
+| Trigger | Every push to `main` |
+| Build output | `dist/` → `gh-pages` branch |
+
+The workflow runs `npm ci && npm run build` and pushes the resulting `dist/` folder to the `gh-pages` branch via [`peaceiris/actions-gh-pages`](https://github.com/peaceiris/actions-gh-pages).
 
 ## 🤝 Contributing
 
